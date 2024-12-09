@@ -10,7 +10,7 @@ export const getData = async () => {
             const response = await fetch(`${config.API_BASE_URL}/endpoint`);
             data = await response.json();
         }
-        console.log(data);
+        console.log("Call get data");
         return data;
     } catch (error) {
         console.error("Error fetching data:", error);
