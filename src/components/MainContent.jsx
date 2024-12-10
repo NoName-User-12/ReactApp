@@ -1,13 +1,27 @@
 import React, { useEffect, useState, useRef } from "react";
 import { DataSet, Network } from "vis-network/standalone";
-import { getData } from "../services/apiService";
 import MBarChar from "./chart/MBarChar";
+import { api } from "../services/apiService";
 
 const MainContent = ({ filters }) => {
-    const [dataTrans, setDataTran] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [dataTrans, setDataTrans] = useState([]);
+    const [loading, setLoading] = useState(false);
     const [ranking, setRanking] = useState([]);
-    const [handledData, setHandledData] = useState([]);
+    const prevFiltersRef = useRef(filters);
+
+    const defaultChartData = {
+        labels: [],
+        datasets: [
+            {
+                label: 'Total amount',
+                data: [],
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1,
+            },
+        ],
+    }
+    const [handledData, setHandledData] = useState(defaultChartData);
 
 
     const formatDate = (date) => {
@@ -15,18 +29,18 @@ const MainContent = ({ filters }) => {
         const day = d.getDate().toString().padStart(2, "0");
         const month = (d.getMonth() + 1).toString().padStart(2, "0");
         const year = d.getFullYear().toString().slice(-2);
-        return `${day}/${month}/${year}`;
+        return `${year}/${month}/${day}`;
     };
 
     const filterData = (data) => {
         if (!data) return [];
 
         let filteredData = data.filter((item) => {
-            filters.type =
+            var tempFilterType =
                 filters.type && filters.type.length > 0
-                    ? filters.type.join(";").split(";")
+                    ? filters.type.join("-").split("-")
                     : [];
-            let typeMatch = filters.type.includes(item.type);
+            let typeMatch = tempFilterType.includes(item.type);
             let amountMatch =
                 (filters.amountMin ? item.amount >= filters.amountMin : true) &&
                 (filters.amountMax ? item.amount <= filters.amountMax : true);
@@ -35,23 +49,33 @@ const MainContent = ({ filters }) => {
                 : true;
             let dateMatch = filters.date
                 ? new Date(item.timestamp).toLocaleDateString() ===
-                  new Date(filters.date).toLocaleDateString()
+                new Date(filters.date).toLocaleDateString()
                 : true;
 
-            return typeMatch && amountMatch && tokenMatch && dateMatch;
+            let accountMatch =
+                filters.account
+                    ? (item.from == filters.account || item.to == filters.account)
+                    : true;
+
+            return typeMatch && amountMatch && tokenMatch && dateMatch && accountMatch;
         });
 
-        setDataTran(filteredData);
+        setDataTrans(filteredData);
     };
 
     const fetchData = async () => {
         setLoading(true);
-        let response = await getData();
-        if (response) {
-            filterData(response);
-            genNetworkChart();
+        setRanking([]);
+        setHandledData(defaultChartData);
+        try {
+            let response = await api.getData();
+            if (response) {
+                filterData(response);
+            }
+        } catch (error) {
+            console.error("Error fetching data:", error);
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const getColor = (type) => {
@@ -93,7 +117,7 @@ const MainContent = ({ filters }) => {
             ([date, transactions]) => {
                 var rs = {
                     name: formatDate(date),
-                    value:  transactions.reduce((sum, transaction) => sum + transaction.totalPrice,0),
+                    value: transactions.reduce((sum, transaction) => sum + transaction.totalPrice, 0),
                 };
 
                 return rs;
@@ -103,19 +127,18 @@ const MainContent = ({ filters }) => {
         const sortedData = rawData.sort(
             (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
         );
-
         const barChartData = {
-            labels: sortedData.map(item => item.month),
+            labels: sortedData.map(item => item.name),
             datasets: [
-              {
-                label: 'Total amount',
-                data: rawData.map(item => item.value),
-                backgroundColor: 'rgba(75, 192, 192, 0.6)',
-                borderColor: 'rgba(75, 192, 192, 1)',
-                borderWidth: 1,
-              },
+                {
+                    label: 'Total amount',
+                    data: sortedData.map(item => item.value),
+                    backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1,
+                },
             ],
-          };
+        };
 
         setHandledData(barChartData);
     };
@@ -126,7 +149,7 @@ const MainContent = ({ filters }) => {
         );
 
         if (!dataBinding) return;
-
+        console.log(dataBinding, dataBinding);
         processDataForBarChart(dataBinding);
 
         updateRanking(nodeData.id, dataBinding);
@@ -163,7 +186,7 @@ const MainContent = ({ filters }) => {
     };
 
     const genNetworkChart = () => {
-        if (dataTrans) {
+        if (dataTrans && dataTrans.length > 0) {
             let networkContainer = document.getElementById("networkGraph");
 
             let nodeData = [];
@@ -262,21 +285,55 @@ const MainContent = ({ filters }) => {
 
             network.on("stabilizationIterationsDone", function () {
                 network.setOptions({ physics: { enabled: false } });
+                setLoading(false);
             });
+        } else {
+            setLoading(false);
         }
+
     };
 
+    // useEffect(() => {
+    //     console.log("Render", filters);
+    //     fetchData();
+    // }, [filters]);
+
     useEffect(() => {
-        fetchData();
-    }, [filters]);
+        if (
+            filters.amountMin !== prevFiltersRef.current.amountMin ||
+            filters.amountMax !== prevFiltersRef.current.amountMax ||
+            filters.token !== prevFiltersRef.current.token ||
+            filters.date !== prevFiltersRef.current.date ||
+            JSON.stringify(filters.type) !== JSON.stringify(prevFiltersRef.current.type) 
+        ) {
+            console.log("Render", filters);
+            fetchData();
+        }
+
+        prevFiltersRef.current = filters;
+    }, [filters])
+
+    useEffect(() => {
+        genNetworkChart();
+    }, [dataTrans]);
 
     return (
         <div className="flex flex-col md:flex-row w-full h-full">
-            <div className="flex-grow p-4 border-r border-gray-200 md:w-7/12">
+            <div className="relative flex-grow p-4 border-r border-gray-200 md:w-7/12">
+                {loading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-gray-500 bg-opacity-50 z-50">
+                        <div className="bg-white p-6 rounded-lg shadow-lg">
+                            <div className="flex items-center">
+                                <div className="w-8 h-8 border-4 border-t-blue-500 border-gray-200 rounded-full animate-spin"></div>
+                                <span className="ml-4 text-gray-700">Loading...</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
                 <div
-                    className="flex-1 p-4"
+                    className="flex-1 p-2"
                     id="networkGraph"
-                    style={{ height: "800px" }}
+                    style={{ height: "100%" }}
                 ></div>
             </div>
 
@@ -285,7 +342,7 @@ const MainContent = ({ filters }) => {
                     <h2 className="text-xl font-semibold mb-4">
                         Daily Trading Graph
                     </h2>
-                    <div>
+                    <div className="bg-white rounded-lg shadow-md p-1">
                         <MBarChar dataHandled={handledData}></MBarChar>
                     </div>
                 </div>

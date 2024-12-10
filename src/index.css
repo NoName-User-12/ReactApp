@@ -16,3 +16,7 @@
   height: 50px;
   animation: spin 2s linear infinite;
 }
+
+.react-datepicker-wrapper {
+  width: 100% !important;
+}
