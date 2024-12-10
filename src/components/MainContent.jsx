@@ -1,25 +1,42 @@
-import React, { useEffect, useState } from "react";
-import { DataSet, Network } from 'vis-network/standalone';
+import React, { useEffect, useState, useRef } from "react";
+import { DataSet, Network } from "vis-network/standalone";
 import { getData } from "../services/apiService";
-import { createChart } from "lightweight-charts";
+import MBarChar from "./chart/MBarChar";
 
 const MainContent = ({ filters }) => {
     const [dataTrans, setDataTran] = useState([]);
     const [loading, setLoading] = useState(true);
     const [ranking, setRanking] = useState([]);
-    const [isSetChart, setIsSetChart] = useState(false);
+    const [handledData, setHandledData] = useState([]);
+
+
+    const formatDate = (date) => {
+        const d = new Date(date);
+        const day = d.getDate().toString().padStart(2, "0");
+        const month = (d.getMonth() + 1).toString().padStart(2, "0");
+        const year = d.getFullYear().toString().slice(-2);
+        return `${day}/${month}/${year}`;
+    };
+
     const filterData = (data) => {
         if (!data) return [];
 
-        let filteredData = data.filter(item => {
-            // Kiểm tra và sử dụng `filters` một cách chính xác
-            filters.type = filters.type && filters.type.length > 0 ? filters.type.join(';').split(';') : [];
+        let filteredData = data.filter((item) => {
+            filters.type =
+                filters.type && filters.type.length > 0
+                    ? filters.type.join(";").split(";")
+                    : [];
             let typeMatch = filters.type.includes(item.type);
             let amountMatch =
                 (filters.amountMin ? item.amount >= filters.amountMin : true) &&
                 (filters.amountMax ? item.amount <= filters.amountMax : true);
-            let tokenMatch = filters.token ? item.token === filters.token : true;
-            let dateMatch = filters.date ? new Date(item.timestamp).toLocaleDateString() === new Date(filters.date).toLocaleDateString() : true;
+            let tokenMatch = filters.token
+                ? item.token === filters.token
+                : true;
+            let dateMatch = filters.date
+                ? new Date(item.timestamp).toLocaleDateString() ===
+                  new Date(filters.date).toLocaleDateString()
+                : true;
 
             return typeMatch && amountMatch && tokenMatch && dateMatch;
         });
@@ -38,109 +55,86 @@ const MainContent = ({ filters }) => {
     };
 
     const getColor = (type) => {
-        let color = '';
+        let color = "";
         switch (type) {
-            case 'Send':
-            case 'Receive':
-                color = '#00c7ad';
+            case "Send":
+            case "Receive":
+                color = "#00c7ad";
                 break;
-            case 'GetReward':
-                color = '#b7ff8d';
+            case "GetReward":
+                color = "#b7ff8d";
                 break;
-            case 'GetCommission':
-                color = '#6e88fa';
+            case "GetCommission":
+                color = "#6e88fa";
                 break;
-            case 'Delegate':
-                color = '#ff89a1';
+            case "Delegate":
+                color = "#ff89a1";
                 break;
-            case 'Redelegate':
-                color = '#fff47e';
+            case "Redelegate":
+                color = "#fff47e";
                 break;
         }
         return color;
     };
 
-    const genTradingViewChart = () => {
-        let chartContainer = document.getElementById("tradingViewGraph");
-        let chart = createChart(chartContainer, {
-            width: chartContainer.clientWidth,
-            height: chartContainer.clientHeight,
-            layout: {
-                backgroundColor: "#ffffff",
-                textColor: "#000",
-            },
-            grid: {
-                vertLines: { color: "#e1e1e1" },
-                horzLines: { color: "#e1e1e1" },
-            },
-        });
+    const processDataForBarChart = (data) => {
+        if (!Array.isArray(data) || data.length === 0) {
+            return [];
+        }
 
-        let candlestickSeries = chart.addCandlestickSeries({
-            upColor: "#4caf50", // Màu nến tăng
-            downColor: "#f44336", // Màu nến giảm
-            borderUpColor: "#4caf50",
-            borderDownColor: "#f44336",
-            wickUpColor: "#4caf50",
-            wickDownColor: "#f44336",
-        });
-
-        chartContainer.__chart = chart;
-
-        chart.addLineSeries();
-    };
-
-    const processDataForCandlestickChart = (data) => {
-        let groupedData = data.reduce((acc, item) => {
-            let date = item.timestamp.split(" ")[0];
+        const groupedData = data.reduce((acc, item) => {
+            const date = item.timestamp.split(" ")[0];
             if (!acc[date]) acc[date] = [];
             acc[date].push(item);
             return acc;
         }, {});
 
-        let candlestickData = Object.entries(groupedData).map(([date, transactions]) => {
-            let prices = transactions.map((t) => t.unitPrice);
+        const rawData = Object.entries(groupedData).map(
+            ([date, transactions]) => {
+                var rs = {
+                    name: formatDate(date),
+                    value:  transactions.reduce((sum, transaction) => sum + transaction.totalPrice,0),
+                };
 
-            return {
-                time: date,
-                open: prices[0],
-                high: Math.max(...prices),
-                low: Math.min(...prices),
-                close: prices[prices.length - 1]
-            };
-        });
+                return rs;
+            }
+        );
 
-        return candlestickData.sort((a, b) => new Date(a.time) - new Date(b.time));
+        const sortedData = rawData.sort(
+            (a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()
+        );
+
+        const barChartData = {
+            labels: sortedData.map(item => item.month),
+            datasets: [
+              {
+                label: 'Total amount',
+                data: rawData.map(item => item.value),
+                backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                borderColor: 'rgba(75, 192, 192, 1)',
+                borderWidth: 1,
+              },
+            ],
+          };
+
+        setHandledData(barChartData);
     };
 
     const updateChart = (nodeData) => {
-        let chartContainer = document.getElementById("tradingViewGraph");
-        let chart = chartContainer.__chart;
-
-        if (!chart) {
-            genTradingViewChart();
-            chartContainer = document.getElementById("tradingViewGraph");
-            chart = chartContainer.__chart;
-        }
-
-        let dataBinding = dataTrans.filter(e => e.from === nodeData.id || e.to === nodeData.id);
+        let dataBinding = dataTrans.filter(
+            (e) => e.from === nodeData.id || e.to === nodeData.id
+        );
 
         if (!dataBinding) return;
 
-        let transactionData = processDataForCandlestickChart(dataBinding);
-        transactionData = transactionData.sort((a, b) => a.time - b.time);
-
-        if (!chart.lineSeries) {
-            chart.lineSeries = chart.addLineSeries();
-        }
-
-        chart.lineSeries.setData(transactionData);
+        processDataForBarChart(dataBinding);
 
         updateRanking(nodeData.id, dataBinding);
     };
 
     const updateRanking = (id, dataBinding) => {
         let transactionCount = {};
-        dataBinding.forEach(e => {
+        dataBinding.forEach((e) => {
             let from = e.from;
             if (from != id) {
                 if (transactionCount[from]) {
@@ -173,26 +167,34 @@ const MainContent = ({ filters }) => {
             let networkContainer = document.getElementById("networkGraph");
 
             let nodeData = [];
-            dataTrans.forEach(element => {
-                if (!nodeData.find(e => e.id == element.from)) {
+            dataTrans.forEach((element) => {
+                if (!nodeData.find((e) => e.id == element.from)) {
                     nodeData.push({
                         id: element.from,
                         size: 10,
                         color: {
-                            background: element.from?.includes('cosmosvaloper') ? '#ad85e4' : '#fff4e4',
-                            border: element.from?.includes('cosmosvaloper') ? '#ad85e4' : '#fff4e4',
-                        }
+                            background: element.from?.includes("cosmosvaloper")
+                                ? "#ad85e4"
+                                : "#fff4e4",
+                            border: element.from?.includes("cosmosvaloper")
+                                ? "#ad85e4"
+                                : "#fff4e4",
+                        },
                     });
                 }
 
-                if (!nodeData.find(e => e.id == element.to)) {
+                if (!nodeData.find((e) => e.id == element.to)) {
                     nodeData.push({
                         id: element.to,
                         size: 20,
                         color: {
-                            background: element.to?.includes('cosmosvaloper') ? '#ad85e4' : '#fff4e4',
-                            border: element.to?.includes('cosmosvaloper') ? '#ad85e4' : '#fff4e4',
-                        }
+                            background: element.to?.includes("cosmosvaloper")
+                                ? "#ad85e4"
+                                : "#fff4e4",
+                            border: element.to?.includes("cosmosvaloper")
+                                ? "#ad85e4"
+                                : "#fff4e4",
+                        },
                     });
                 }
             });
@@ -200,45 +202,52 @@ const MainContent = ({ filters }) => {
             let nodes = new DataSet(nodeData);
 
             let edgeData = [];
-            dataTrans.forEach(element => {
+            dataTrans.forEach((element) => {
                 edgeData.push({
                     from: element.from,
                     to: element.to,
                     color: {
                         color: getColor(element.type),
                     },
-                    size: 0.5
+                    size: 0.5,
                 });
             });
 
             let edges = new DataSet(edgeData);
 
             let networkData = { nodes, edges };
+
             let options = {
+                edges: {
+                    smooth: {
+                        type: "dynamic",
+                        forceDirection: "none",
+                        roundness: 0.5,
+                    },
+                },
                 physics: {
                     enabled: true,
-                    solver: 'forceAtlas2Based',
-                    forceAtlas2Based: {
-                        gravitationalConstant: -100,
-                        centralGravity: 0.05,
-                        springLength: 150,
+                    solver: "repulsion",
+                    repulsion: {
+                        centralGravity: 0.5,
+                        springLength: 200,
                         springConstant: 0.05,
+                        nodeDistance: 150,
+                        damping: 0.09,
                     },
                     stabilization: {
-                        enabled: true,
-                        iterations: 500,
-                        updateInterval: 10,
+                        iterations: 200,
                     },
                 },
                 interaction: {
+                    dragNodes: false,
+                    dragView: true,
                     zoomView: true,
                 },
-                edges: {
-                    smooth: {
-                        type: 'dynamic',
-                        roundness: 0.7,
-                    },
-                }
+                layout: {
+                    improvedLayout: true,
+                    hierarchical: false,
+                },
             };
 
             let network = new Network(networkContainer, networkData, options);
@@ -250,6 +259,10 @@ const MainContent = ({ filters }) => {
                     updateChart(nodeData);
                 }
             });
+
+            network.on("stabilizationIterationsDone", function () {
+                network.setOptions({ physics: { enabled: false } });
+            });
         }
     };
 
@@ -259,14 +272,22 @@ const MainContent = ({ filters }) => {
 
     return (
         <div className="flex flex-col md:flex-row w-full h-full">
-            <div className="flex-grow p-4 border-r border-gray-200 md:w-2/3">
-                <div className="flex-1 p-4" id="networkGraph" style={{ height: "800px" }}></div>
+            <div className="flex-grow p-4 border-r border-gray-200 md:w-7/12">
+                <div
+                    className="flex-1 p-4"
+                    id="networkGraph"
+                    style={{ height: "800px" }}
+                ></div>
             </div>
 
-            <div className="flex flex-col w-[520px] md:w-1/3 p-4 bg-gray-100">
+            <div className="flex flex-col w-[520px] md:w-5/12 p-4 bg-gray-100">
                 <div className="mb-6">
-                    <h2 className="text-xl font-semibold mb-4">Daily Trading Graph</h2>
-                    <div className="bg-white rounded-lg" id="tradingViewGraph" style={{ height: "300px" }}></div>
+                    <h2 className="text-xl font-semibold mb-4">
+                        Daily Trading Graph
+                    </h2>
+                    <div>
+                        <MBarChar dataHandled={handledData}></MBarChar>
+                    </div>
                 </div>
 
                 <div>
@@ -276,19 +297,37 @@ const MainContent = ({ filters }) => {
                             <table className="min-w-full table-auto">
                                 <thead>
                                     <tr className="border-b">
-                                        <th className="py-2 px-4 text-left text-sm font-semibold text-gray-700">Account</th>
-                                        <th className="py-2 px-4 text-left text-sm font-semibold text-gray-700">Transactions</th>
+                                        <th className="py-2 px-4 text-left text-sm font-semibold text-gray-700">
+                                            Account
+                                        </th>
+                                        <th className="py-2 px-4 text-left text-sm font-semibold text-gray-700">
+                                            Transactions
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {ranking && ranking.length > 0 ? ranking.map((item, index) => (
-                                        <tr key={index} className="border-b hover:bg-gray-100">
-                                            <td className="py-2 px-4 text-sm text-gray-800">{item.account}</td>
-                                            <td className="py-2 px-4 text-sm text-gray-800">{item.count}</td>
-                                        </tr>
-                                    )) : (
+                                    {ranking && ranking.length > 0 ? (
+                                        ranking.map((item, index) => (
+                                            <tr
+                                                key={index}
+                                                className="border-b hover:bg-gray-100"
+                                            >
+                                                <td className="py-2 px-4 text-sm text-gray-800">
+                                                    {item.account}
+                                                </td>
+                                                <td className="py-2 px-4 text-sm text-gray-800">
+                                                    {item.count}
+                                                </td>
+                                            </tr>
+                                        ))
+                                    ) : (
                                         <tr className="border-b text-center">
-                                            <td colSpan="3" className="py-4 px-4 text-sm text-gray-500">No transactions yet</td>
+                                            <td
+                                                colSpan="3"
+                                                className="py-4 px-4 text-sm text-gray-500"
+                                            >
+                                                No transactions yet
+                                            </td>
                                         </tr>
                                     )}
                                 </tbody>
@@ -296,7 +335,6 @@ const MainContent = ({ filters }) => {
                         </div>
                     </div>
                 </div>
-
             </div>
         </div>
     );
